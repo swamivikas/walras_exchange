@@ -184,12 +184,12 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// 5. Wait for GPU answer (with 15s timeout)
+	// 5. Wait for GPU answer (with 60s timeout for remote cloud nodes)
 	var rawAnswer []byte
 	select {
 	case rawAnswer = <-respChan:
 		// Received answer from GPU daemon!
-	case <-time.After(15 * time.Second):
+	case <-time.After(90 * time.Second):
 		matchedSession.PendingJobs.Delete(requestID)
 		http.Error(w, `{"error": "gpu_node_timed_out"}`, http.StatusGatewayTimeout)
 		return
@@ -229,9 +229,10 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 
 	platformFee := totalCost / 100 // 1% platform fee
 
-	// 8. Record in `buyer_usage_transactions` (Async DB insert with exact latency)
+	// 8. Record in `buyer_usage_transactions` (Async DB insert with exact latency & balance updates)
 	txID := uuid.New().String()
-	go func(latency int, id string) {
+	totalCharged := totalCost + (platformFee * 3)
+	go func(latency int, id string, charged int64) {
 		txQuery := `
 			INSERT INTO buyer_usage_transactions (
 				id, enterprise_owner_id, buyer_agent_id, seller_agent_id, capability_id,
@@ -249,12 +250,27 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 			req.Model,
 			totalCost,
 			platformFee*3, // 3% enterprise surcharge
-			totalCost+(platformFee*3),
+			charged,
 			latency,
 			daemonResp.PromptTokens,
 			daemonResp.CompletionTokens,
 		)
-	}(actualLatencyMS, txID)
+
+		// Atomic Balance Deduction from Buyer Credit Limit
+		h.Repo.DB.Exec(`
+			UPDATE owners 
+			SET credit_limit_micro_usd = GREATEST(0, credit_limit_micro_usd - ?) 
+			WHERE id = ?
+		`, charged, buyerAgent.OwnerID)
+
+		// Credit Seller Node Earnings (99% base compute to seller, 1% platform fee)
+		sellerTake := totalCost - (totalCost / 100)
+		h.Repo.DB.Exec(`
+			UPDATE agents 
+			SET balance_micro_usd = balance_micro_usd + ? 
+			WHERE id = ?
+		`, sellerTake, matchedSellerAgentID)
+	}(actualLatencyMS, txID, totalCharged)
 
 	// Broadcast transaction event to live SSE clients in <0.1ms
 	tapeItem := SettlementTapeItem{

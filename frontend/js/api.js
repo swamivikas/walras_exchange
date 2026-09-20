@@ -26,6 +26,19 @@ export async function getUserAgentsAPI(ownerID) {
   const res = await fetch(`${state.gatewayURL}/v1/user/agents?owner_id=${ownerID}`);
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to fetch user agents');
+
+  if (data.credit_limit_micro_usd !== undefined && state.currentUser) {
+    state.currentUser.credit_limit_micro_usd = data.credit_limit_micro_usd;
+    state.currentUser.balance_usd = data.balance_usd;
+    sessionStorage.setItem('walras_user', JSON.stringify(state.currentUser));
+    const verifyBalance = document.getElementById('verifyBalance');
+    const verifyMicroBalance = document.getElementById('verifyMicroBalance');
+    const userCreditDisplay = document.getElementById('userCreditDisplay');
+    if (verifyBalance) verifyBalance.innerText = data.balance_usd;
+    if (userCreditDisplay) userCreditDisplay.innerText = data.balance_usd;
+    if (verifyMicroBalance) verifyMicroBalance.innerText = `${data.credit_limit_micro_usd.toLocaleString()} µUSD`;
+  }
+
   return data.agents || [];
 }
 

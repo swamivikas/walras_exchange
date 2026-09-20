@@ -137,15 +137,25 @@ def dispatch_to_gateway(agent_type, prompt, model=""):
     req = urllib.request.Request(url, data=req_data, headers=headers, method="POST")
 
     try:
-        with urllib.request.urlopen(req, timeout=30.0) as resp:
+        with urllib.request.urlopen(req, timeout=90.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             choices = data.get("choices", [])
             if choices and "message" in choices[0]:
                 content = choices[0]["message"].get("content", "")
                 usage = data.get("usage", {})
-                tokens_info = f"\n\n[Walras Clearinghouse Settlement: Model={data.get('model', 'Node')}, Tokens={usage.get('total_tokens', 'N/A')}]"
-                return content + tokens_info
-            return json.dumps(data)
+                settlement = data.get("settlement", {})
+                meta = (
+                    f"\n\n=======================================================\n"
+                    f"🌐 [RAW REMOTE NODE EXECUTION TELEMETRY]\n"
+                    f"• Remote Node ID   : {settlement.get('execution_node_id', 'N/A')}\n"
+                    f"• Model Tag        : {data.get('model', 'N/A')}\n"
+                    f"• Tokens Generated : {usage.get('completion_tokens', 'N/A')} (Prompt: {usage.get('prompt_tokens', 'N/A')}, Total: {usage.get('total_tokens', 'N/A')})\n"
+                    f"• Cleared Cost     : {settlement.get('formatted_cost_usd', 'N/A')} ({settlement.get('cost_micro_usd', 'N/A')} µUSD)\n"
+                    f"• Platform Fee     : {settlement.get('platform_fee_micro_usd', 'N/A')} µUSD\n"
+                    f"======================================================="
+                )
+                return content + meta
+            return json.dumps(data, indent=2)
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8")
         return f"[Walras Gateway Error HTTP {e.code}]: {err_body}"

@@ -118,8 +118,9 @@ func main() {
 	server := &http.Server{
 		Addr:         ":8080",
 		Handler:      withCORS(mux),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  0, // Zero timeout required for long-lived WebSocket tunnels and LLM inference
+		WriteTimeout: 0,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	log.Println("⚡ Gateway Engine listening on http://localhost:8080")

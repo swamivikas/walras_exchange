@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -126,10 +127,16 @@ func (h *AuthHandler) HandleGetUserAgents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	var creditLimitMicroUSD int64
+	_ = h.Repo.DB.QueryRow(`SELECT credit_limit_micro_usd FROM owners WHERE id = ? LIMIT 1`, ownerID).Scan(&creditLimitMicroUSD)
+	balanceUSD := fmt.Sprintf("$%.2f USD", float64(creditLimitMicroUSD)/1000000.0)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"owner_id": ownerID,
-		"agents":   agents,
+		"owner_id":               ownerID,
+		"credit_limit_micro_usd": creditLimitMicroUSD,
+		"balance_usd":            balanceUSD,
+		"agents":                 agents,
 	})
 }
