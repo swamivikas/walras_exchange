@@ -51,14 +51,14 @@ CREATE TABLE IF NOT EXISTS agents (
         'GENERAL_LLM_INFERENCE',
         'WEB_SCRAPER',
         'CUSTOM_MICROSERVICE'
-    ) NOT NULL,
+    ) NOT NULL DEFAULT 'GENERAL_LLM_INFERENCE',
     
-    max_concurrency INT DEFAULT 2,
-    vram_gb INT DEFAULT 24,
+    max_concurrency INT NOT NULL DEFAULT 1,
+    vram_gb INT DEFAULT 0,
     agent_role ENUM('BUYER', 'SELLER', 'HYBRID') NOT NULL,
     api_key_hash VARCHAR(64) UNIQUE NOT NULL,           -- SHA-256 hash of API key
-    api_key_prefix VARCHAR(30),                         -- e.g. 'walras_live_org_...' for UI display
-    api_endpoint VARCHAR(512),                          -- Optional for serverless HTTP workers
+    api_key_prefix VARCHAR(64) DEFAULT NULL,            -- e.g. 'walras_live_org_...' for UI display
+    api_endpoint VARCHAR(512) DEFAULT NULL,             -- Optional for serverless HTTP workers
     
     -- In-Memory Sync & Approval Fields
     balance_micro_usd BIGINT DEFAULT 0,                 -- Accrued earnings or balance
@@ -85,9 +85,9 @@ CREATE TABLE IF NOT EXISTS capabilities (
     tool_name VARCHAR(100) NOT NULL,                    -- e.g. 'deepseek-r1', 'web-scraper'
     description TEXT,
     json_schema JSON NOT NULL,                          -- Parameter schema (MCP standard)
-    input_token_price_micro_usd BIGINT DEFAULT 2,
-    output_token_price_micro_usd BIGINT DEFAULT 2,
-    fixed_cost_per_call_micro_usd BIGINT DEFAULT 0,
+    input_token_price_micro_usd BIGINT NOT NULL DEFAULT 0,
+    output_token_price_micro_usd BIGINT NOT NULL DEFAULT 0,
+    fixed_cost_per_call_micro_usd BIGINT NOT NULL DEFAULT 0,
     avg_latency_ms INT DEFAULT 0,
     reputation_score DECIMAL(3, 2) DEFAULT 5.00,
     is_active TINYINT(1) DEFAULT 1,
@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS capabilities (
     FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
     INDEX idx_capabilities_tool_name (tool_name),
     INDEX idx_capabilities_agent_id (agent_id),
+    INDEX idx_capabilities_reputation (reputation_score),
     INDEX idx_capabilities_active (is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

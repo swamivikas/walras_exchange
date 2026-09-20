@@ -8,9 +8,10 @@ type ChatMessage struct {
 
 // ChatCompletionRequest is the standard OpenAI payload sent by Cursor/Claude/Python
 type ChatCompletionRequest struct {
-	Model       string        `json:"model"`       // e.g. "deepseek-r1"
-	Messages    []ChatMessage `json:"messages"`    // Array of conversation messages
-	Temperature float64       `json:"temperature"` // 0.0 to 1.0
+	AgentType   string        `json:"agent_type,omitempty"` // Optional: "MATH_SOLVER", "CODE_GENERATOR", etc.
+	Model       string        `json:"model"`                // e.g. "deepseek-r1"
+	Messages    []ChatMessage `json:"messages"`             // Array of conversation messages
+	Temperature float64       `json:"temperature"`          // 0.0 to 1.0
 	MaxTokens   int           `json:"max_tokens"`
 }
 

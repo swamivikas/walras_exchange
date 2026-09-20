@@ -57,6 +57,7 @@ func main() {
 	mux.HandleFunc("POST /v1/seller/agents", sellerHandler.HandleAddSellerAgent)
 	mux.HandleFunc("GET /v1/provider/tunnel", tunnelHandler.HandleProviderTunnel)
 	mux.HandleFunc("POST /v1/chat/completions", chatHandler.HandleChatCompletions)
+	mux.HandleFunc("GET /v1/agent-types", gateway.HandleAgentTypes)
 	mux.HandleFunc("GET /v1/pricing", pricingHandler.HandleGetPricing)
 	
 	// Health Check Route

@@ -11,7 +11,7 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - walrasexchange_mysql_data:/var/lib/mysql
       - ./migrations/001_initial_schema_mysql.sql:/docker-entrypoint-initdb.d/001_initial_schema_mysql.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
@@ -20,4 +20,5 @@ services:
       retries: 10
 
 volumes:
-  mysql_data:
+  walrasexchange_mysql_data:
+    external: true

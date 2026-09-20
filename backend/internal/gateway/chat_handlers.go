@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -84,18 +85,40 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 
 	lastPrompt := req.Messages[len(req.Messages)-1].Content
 
-	// 3. Matcher: ONLY pick agents that are ACTIVE and APPROVED!
-	capQuery := `
-		SELECT c.id, c.agent_id, c.input_token_price_micro_usd, c.output_token_price_micro_usd, c.fixed_cost_per_call_micro_usd 
-		FROM capabilities c
-		JOIN agents a ON c.agent_id = a.id
-		WHERE c.tool_name = ? 
-		  AND c.is_active = 1 
-		  AND a.status = 'ACTIVE' 
-		  AND a.approval_status = 'APPROVED'
-		ORDER BY c.reputation_score DESC
-	`
-	rows, err := h.Repo.DB.Query(capQuery, req.Model)
+	// 3. Matcher: Support optional AgentType domain targeting + Model matching
+	var capQuery string
+	var rows *sql.Rows
+
+	req.AgentType = strings.TrimSpace(req.AgentType)
+	req.Model = strings.TrimSpace(req.Model)
+
+	if req.AgentType != "" {
+		capQuery = `
+			SELECT c.id, c.agent_id, c.input_token_price_micro_usd, c.output_token_price_micro_usd, c.fixed_cost_per_call_micro_usd 
+			FROM capabilities c
+			JOIN agents a ON c.agent_id = a.id
+			WHERE a.agent_type = ?
+			  AND (c.tool_name = ? OR ? = '')
+			  AND c.is_active = 1 
+			  AND a.status = 'ACTIVE' 
+			  AND a.approval_status = 'APPROVED'
+			ORDER BY c.reputation_score DESC
+		`
+		rows, err = h.Repo.DB.Query(capQuery, req.AgentType, req.Model, req.Model)
+	} else {
+		capQuery = `
+			SELECT c.id, c.agent_id, c.input_token_price_micro_usd, c.output_token_price_micro_usd, c.fixed_cost_per_call_micro_usd 
+			FROM capabilities c
+			JOIN agents a ON c.agent_id = a.id
+			WHERE c.tool_name = ? 
+			  AND c.is_active = 1 
+			  AND a.status = 'ACTIVE' 
+			  AND a.approval_status = 'APPROVED'
+			ORDER BY c.reputation_score DESC
+		`
+		rows, err = h.Repo.DB.Query(capQuery, req.Model)
+	}
+
 	if err != nil {
 		http.Error(w, `{"error": "database_error_querying_capabilities"}`, http.StatusInternalServerError)
 		return
@@ -120,13 +143,17 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 				outputPrice = outPrice
 				fixedCost = fCost
 				foundOnlineNode = true
-				break // Found the best online GPU node!
+				break // Found the best online GPU node in this pool!
 			}
 		}
 	}
 
 	if !foundOnlineNode {
-		http.Error(w, fmt.Sprintf(`{"error": "all_gpu_nodes_for_model_are_currently_offline", "model": "%s"}`, req.Model), http.StatusServiceUnavailable)
+		targetDesc := req.Model
+		if req.AgentType != "" {
+			targetDesc = req.AgentType + " (" + req.Model + ")"
+		}
+		http.Error(w, fmt.Sprintf(`{"error": "all_gpu_nodes_for_target_are_currently_offline", "target": "%s"}`, targetDesc), http.StatusServiceUnavailable)
 		return
 	}
 
@@ -137,8 +164,10 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 
 	jobPayload := map[string]interface{}{
 		"request_id": requestID,
+		"agent_type": req.AgentType,
 		"model":      req.Model,
 		"prompt":     lastPrompt,
+		"messages":   req.Messages,
 	}
 
 	if err := matchedSession.WriteJSON(jobPayload); err != nil {
