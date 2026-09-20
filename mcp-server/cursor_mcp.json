@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "walras": {
+      "command": "python",
+      "args": [
+        "c:\\Users\\swami\\OneDrive\\Desktop\\Walras Exchange\\mcp-server\\server.py"
+      ],
+      "env": {
+        "WALRAS_API_KEY": "walras_live_org_5987bfec_e2ddbec4b678f307a6de07e39f0278d3",
+        "WALRAS_GATEWAY_URL": "http://localhost:8080"
+      }
+    }
+  }
+}
