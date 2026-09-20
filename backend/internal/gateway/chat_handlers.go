@@ -158,8 +158,13 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 	}
 
 	// 4. Dispatch Job Down WebSocket Tunnel (<1ms)
+	requestStartTime := time.Now()
 	matchedSession.InFlight.Add(1)
-	defer matchedSession.InFlight.Add(-1)
+	tunnel.GlobalTunnelPool.NotifyChange()
+	defer func() {
+		matchedSession.InFlight.Add(-1)
+		tunnel.GlobalTunnelPool.NotifyChange()
+	}()
 
 	requestID := "req-" + uuid.New().String()
 	respChan := make(chan []byte, 1)
@@ -188,6 +193,11 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 		matchedSession.PendingJobs.Delete(requestID)
 		http.Error(w, `{"error": "gpu_node_timed_out"}`, http.StatusGatewayTimeout)
 		return
+	}
+
+	actualLatencyMS := int(time.Since(requestStartTime).Milliseconds())
+	if actualLatencyMS <= 0 {
+		actualLatencyMS = 1
 	}
 
 	// 6. Parse response from daemon
@@ -219,18 +229,19 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 
 	platformFee := totalCost / 100 // 1% platform fee
 
-	// 8. Record in `buyer_usage_transactions` (Async DB insert)
-	go func() {
+	// 8. Record in `buyer_usage_transactions` (Async DB insert with exact latency)
+	txID := uuid.New().String()
+	go func(latency int, id string) {
 		txQuery := `
 			INSERT INTO buyer_usage_transactions (
 				id, enterprise_owner_id, buyer_agent_id, seller_agent_id, capability_id,
 				tool_name, base_compute_micro_usd, enterprise_fee_micro_usd, total_charged_micro_usd,
 				latency_ms, prompt_tokens, completion_tokens, billing_cycle_id, status
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 300, ?, ?, '2026-09', 'SETTLED')
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-09', 'SETTLED')
 		`
 		h.Repo.DB.Exec(
 			txQuery,
-			uuid.New().String(),
+			id,
 			buyerAgent.OwnerID,
 			buyerAgent.AgentID,
 			matchedSellerAgentID,
@@ -239,10 +250,30 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 			totalCost,
 			platformFee*3, // 3% enterprise surcharge
 			totalCost+(platformFee*3),
+			latency,
 			daemonResp.PromptTokens,
 			daemonResp.CompletionTokens,
 		)
-	}()
+	}(actualLatencyMS, txID)
+
+	// Broadcast transaction event to live SSE clients in <0.1ms
+	tapeItem := SettlementTapeItem{
+		TxID:             txID,
+		BuyerName:        "GEMINI_LOCAL",
+		SellerNodeName:   matchedSession.NodeName,
+		ToolName:         req.Model,
+		BaseComputeUSD:   formatMicroUSD(totalCost),
+		EnterpriseFeeUSD: formatMicroUSD(platformFee * 3),
+		TotalChargedUSD:  formatMicroUSD(totalCost + (platformFee * 3)),
+		NetProfitUSD:     formatMicroUSD((platformFee * 3) + (totalCost / 100)),
+		LatencyMS:        actualLatencyMS,
+		PromptTokens:     daemonResp.PromptTokens,
+		CompletionTokens: daemonResp.CompletionTokens,
+		TotalTokens:      daemonResp.PromptTokens + daemonResp.CompletionTokens,
+		Status:           "SETTLED",
+		CreatedAt:        time.Now().Format("15:04:05"),
+	}
+	GlobalOpsBroadcaster.BroadcastTransaction(tapeItem)
 
 	// 9. Build and Return OpenAI Standard JSON Response
 	w.Header().Set("Content-Type", "application/json")

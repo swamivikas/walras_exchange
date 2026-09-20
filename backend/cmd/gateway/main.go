@@ -85,6 +85,7 @@ func main() {
 	opsMux := http.NewServeMux()
 	opsMux.HandleFunc("GET /v1/ops/telemetry", opsHandler.HandleTelemetry)
 	opsMux.HandleFunc("GET /v1/ops/settlement-tape", opsHandler.HandleSettlementTape)
+	opsMux.HandleFunc("GET /v1/ops/stream", opsHandler.HandleStream)
 	opsMux.HandleFunc("POST /v1/ops/killswitch", opsHandler.HandleKillswitch)
 	opsMux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -103,7 +104,7 @@ func main() {
 		Addr:         ":8090",
 		Handler:      withCORS(opsMux),
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 0, // Zero timeout required for indefinite SSE persistent streaming
 	}
 
 	go func() {

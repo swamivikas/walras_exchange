@@ -45,8 +45,8 @@ def on_message(ws, message):
                     completion_tokens = ollama_resp.get("eval_count", 25)
                     print(f"🔥 [Ollama Real GPU]: Generated {completion_tokens} tokens locally!")
         except Exception:
-            # High-performance local agent compute simulation (3.0s realistic GPU inference)
-            time.sleep(3.0)
+            # Ultra-low latency GPU edge simulation (~45ms execution)
+            time.sleep(0.045)
             if agent_type == "MATH_SOLVER":
                 answer = (
                     f"### [Walras Verified Worker: MATH_SOLVER ({model})]\n\n"

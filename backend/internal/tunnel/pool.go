@@ -77,16 +77,28 @@ type TunnelPool struct {
 // GlobalTunnelPool is the singleton tunnel registry
 var GlobalTunnelPool = &TunnelPool{}
 
+// OnPoolStateChanged is an optional callback invoked whenever nodes or slots change
+var OnPoolStateChanged func()
+
+// NotifyChange immediately invokes the real-time event hook
+func (p *TunnelPool) NotifyChange() {
+	if OnPoolStateChanged != nil {
+		go OnPoolStateChanged()
+	}
+}
+
 // RegisterSession adds a newly connected hardware node to the live pool
 func (p *TunnelPool) RegisterSession(session *TunnelSession) {
 	p.sessions.Store(session.AgentID, session)
 	log.Printf("🔌 [Tunnel Pool] Node Connected & Live: AgentID=%s (Total Live Nodes: %d)", session.AgentID, p.Count())
+	p.NotifyChange()
 }
 
 // UnregisterSession removes a disconnected node
 func (p *TunnelPool) UnregisterSession(agentID string) {
 	p.sessions.Delete(agentID)
 	log.Printf("🔌 [Tunnel Pool] Node Disconnected: AgentID=%s", agentID)
+	p.NotifyChange()
 }
 
 // DisconnectNode terminates the socket and unregisters the node (Killswitch)
@@ -99,6 +111,7 @@ func (p *TunnelPool) DisconnectNode(agentID string) error {
 	session.Conn.Close()
 	p.sessions.Delete(agentID)
 	log.Printf("🛑 [Killswitch] Quarantined & Disconnected Node: AgentID=%s", agentID)
+	p.NotifyChange()
 	return nil
 }
 

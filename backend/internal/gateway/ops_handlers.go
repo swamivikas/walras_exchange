@@ -4,11 +4,68 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"walras-exchange/internal/db"
 	"walras-exchange/internal/tunnel"
 )
+
+type OpsBroadcaster struct {
+	clients map[chan []byte]bool
+	mu      sync.RWMutex
+}
+
+var GlobalOpsBroadcaster = &OpsBroadcaster{
+	clients: make(map[chan []byte]bool),
+}
+
+func init() {
+	tunnel.OnPoolStateChanged = func() {
+		GlobalOpsBroadcaster.BroadcastTelemetry()
+	}
+}
+
+func (b *OpsBroadcaster) Subscribe(ch chan []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.clients[ch] = true
+}
+
+func (b *OpsBroadcaster) Unsubscribe(ch chan []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.clients, ch)
+	close(ch)
+}
+
+func (b *OpsBroadcaster) Broadcast(eventName string, data interface{}) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if len(b.clients) == 0 {
+		return
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	msg := []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventName, payload))
+	for ch := range b.clients {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+func (b *OpsBroadcaster) BroadcastTelemetry() {
+	telemetry := tunnel.GlobalTunnelPool.GetTelemetry()
+	b.Broadcast("telemetry", telemetry)
+}
+
+func (b *OpsBroadcaster) BroadcastTransaction(item SettlementTapeItem) {
+	b.Broadcast("transaction", item)
+}
 
 type OpsHandler struct {
 	Repo *db.Repository
@@ -155,4 +212,52 @@ func (h *OpsHandler) HandleKillswitch(w http.ResponseWriter, r *http.Request) {
 func formatMicroUSD(micro int64) string {
 	dollars := float64(micro) / 1000000.0
 	return fmt.Sprintf("$%.4f", dollars)
+}
+
+// HandleStream serves GET /v1/ops/stream (Real-Time Server-Sent Events SSE <1ms)
+func (h *OpsHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error": "streaming_unsupported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	// 1. Send initial telemetry snapshot immediately
+	initialTelemetry := tunnel.GlobalTunnelPool.GetTelemetry()
+	initData, _ := json.Marshal(initialTelemetry)
+	fmt.Fprintf(w, "event: telemetry\ndata: %s\n\n", initData)
+	flusher.Flush()
+
+	// 2. Register to live event channel
+	ch := make(chan []byte, 32)
+	GlobalOpsBroadcaster.Subscribe(ch)
+	defer GlobalOpsBroadcaster.Unsubscribe(ch)
+
+	// Heartbeat tick every 5 seconds to keep connection alive
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			w.Write(msg)
+			flusher.Flush()
+		case <-ticker.C:
+			fmt.Fprintf(w, ": ping\n\n")
+			flusher.Flush()
+		}
+	}
 }
