@@ -7,7 +7,7 @@ export async function loginAPI(email, password) {
     body: JSON.stringify({ email, password })
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Authentication failed');
+  if (!res.ok) throw new Error(data.details || data.error || 'Authentication failed');
   return data;
 }
 
@@ -18,7 +18,7 @@ export async function signupAPI(name, email, password, userType) {
     body: JSON.stringify({ name, email, password, user_type: userType })
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Registration failed');
+  if (!res.ok) throw new Error(data.details || data.error || 'Registration failed');
   return data;
 }
 

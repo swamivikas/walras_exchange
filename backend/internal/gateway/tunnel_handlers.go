@@ -56,7 +56,7 @@ func (h *TunnelHandler) HandleProviderTunnel(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		var dbAgent vault.CachedAgent
 		query := `
-			SELECT id, owner_id, agent_role, agent_type, max_concurrency, status, approval_status 
+			SELECT id, owner_id, name, agent_role, agent_type, max_concurrency, status, approval_status 
 			FROM agents 
 			WHERE api_key_hash = ? AND status = 'ACTIVE' 
 			LIMIT 1
@@ -64,6 +64,7 @@ func (h *TunnelHandler) HandleProviderTunnel(w http.ResponseWriter, r *http.Requ
 		err = h.Repo.DB.QueryRow(query, keyHash).Scan(
 			&dbAgent.AgentID,
 			&dbAgent.OwnerID,
+			&dbAgent.NodeName,
 			&dbAgent.Role,
 			&dbAgent.AgentType,
 			&dbAgent.MaxConcurrency,
@@ -95,10 +96,13 @@ func (h *TunnelHandler) HandleProviderTunnel(w http.ResponseWriter, r *http.Requ
 	}
 
 	session := &tunnel.TunnelSession{
-		AgentID:     agent.AgentID,
-		OwnerID:     agent.OwnerID,
-		Conn:        conn,
-		ConnectedAt: time.Now(),
+		AgentID:        agent.AgentID,
+		OwnerID:        agent.OwnerID,
+		NodeName:       agent.NodeName,
+		AgentType:      agent.AgentType,
+		MaxConcurrency: agent.MaxConcurrency,
+		Conn:           conn,
+		ConnectedAt:    time.Now(),
 	}
 	tunnel.GlobalTunnelPool.RegisterSession(session)
 	defer tunnel.GlobalTunnelPool.UnregisterSession(agent.AgentID)

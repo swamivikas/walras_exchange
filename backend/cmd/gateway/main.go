@@ -80,7 +80,40 @@ func main() {
 	fs := http.FileServer(http.Dir(frontendDir))
 	mux.Handle("GET /", fs)
 
-	// 5. Start HTTP Server with CORS enabled
+	// 5. Dedicated Internal Network Operations War Room (NOC) on Port :8090
+	opsHandler := gateway.NewOpsHandler(repo)
+	opsMux := http.NewServeMux()
+	opsMux.HandleFunc("GET /v1/ops/telemetry", opsHandler.HandleTelemetry)
+	opsMux.HandleFunc("GET /v1/ops/settlement-tape", opsHandler.HandleSettlementTape)
+	opsMux.HandleFunc("POST /v1/ops/killswitch", opsHandler.HandleKillswitch)
+	opsMux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status": "ok", "service": "walras-warroom-ops", "port": 8090}`))
+	})
+
+	warroomDir := "./warroom"
+	if _, err := os.Stat(warroomDir); os.IsNotExist(err) {
+		if _, err := os.Stat("../warroom"); err == nil {
+			warroomDir = "../warroom"
+		}
+	}
+	opsMux.Handle("GET /", http.FileServer(http.Dir(warroomDir)))
+
+	opsServer := &http.Server{
+		Addr:         ":8090",
+		Handler:      withCORS(opsMux),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+	}
+
+	go func() {
+		log.Println("🚨 [INTERNAL WAR ROOM] Dedicated NOC Command Center live on http://localhost:8090")
+		if err := opsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("❌ Internal War Room Server error: %v", err)
+		}
+	}()
+
+	// 6. Start Public Gateway Server on :8080 with CORS enabled
 	server := &http.Server{
 		Addr:         ":8080",
 		Handler:      withCORS(mux),
@@ -89,7 +122,7 @@ func main() {
 	}
 
 	log.Println("⚡ Gateway Engine listening on http://localhost:8080")
-	log.Println("🖥️  Palantir Command Center UI live on http://localhost:8080")
+	log.Println("🖥️  Public Client Dashboard live on http://localhost:8080")
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("❌ Server error: %v", err)
 	}

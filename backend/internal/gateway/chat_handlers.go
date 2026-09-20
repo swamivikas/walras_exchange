@@ -158,6 +158,9 @@ func (h *ChatHandler) HandleChatCompletions(w http.ResponseWriter, r *http.Reque
 	}
 
 	// 4. Dispatch Job Down WebSocket Tunnel (<1ms)
+	matchedSession.InFlight.Add(1)
+	defer matchedSession.InFlight.Add(-1)
+
 	requestID := "req-" + uuid.New().String()
 	respChan := make(chan []byte, 1)
 	matchedSession.PendingJobs.Store(requestID, respChan)

@@ -11,6 +11,7 @@ import (
 type CachedAgent struct {
 	AgentID        string
 	OwnerID        string
+	NodeName       string
 	Role           string       // "BUYER", "SELLER", "HYBRID"
 	AgentType      string       // "MATH_SOLVER", "OCR_DOCUMENT_PARSER", "GENERAL_LLM_INFERENCE", etc.
 	Status         string       // "ACTIVE", "SUSPENDED"

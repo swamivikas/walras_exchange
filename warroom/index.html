@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Walras NOC War Room // Internal Network Operations Center</title>
+  <meta name="description" content="Internal Network Operations War Room for Walras Compute Clearinghouse - Live Domain Pool Telemetry, Concurrency Settlement & Node Fleet Control">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="warroom-body">
+
+  <!-- TOP HEADER / NOC COMMAND BAR -->
+  <header class="noc-header">
+    <div class="header-left">
+      <div class="brand-radar">
+        <div class="radar-sweep"></div>
+        <div class="radar-dot"></div>
+      </div>
+      <div class="brand-title">
+        <div class="title-row">
+          <span class="brand-name">WALRAS EXCHANGE</span>
+          <span class="brand-tag">NOC WAR ROOM</span>
+          <span class="sec-badge">RESTRICTED // INTERNAL USE ONLY</span>
+        </div>
+        <div class="subtitle-row">
+          <span class="sub-text">In-Memory Hot-RAM Clearinghouse &amp; Reverse-Tunnel Mesh Telemetry</span>
+          <span class="sub-port">LISTENING ON DEDICATED PORT <strong>:8090</strong></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="status-pod" id="connStatusPod">
+        <span class="pulsing-led online" id="statusLed"></span>
+        <span class="status-label" id="statusLabel">GATEWAY CONNECTED</span>
+        <span class="status-ping" id="statusPing">&lt;1ms</span>
+      </div>
+
+      <div class="clock-pod">
+        <span class="clock-label">SYS_TIME (LOCAL)</span>
+        <span class="clock-time" id="clockDisplay">--:--:--.--</span>
+      </div>
+
+      <div class="control-actions">
+        <button class="btn-refresh" id="btnManualRefresh" title="Force Sync RAM Telemetry">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          SYNC
+        </button>
+
+        <a href="http://localhost:8080" target="_blank" class="btn-external-link" title="Open Public Client Portal">
+          <span>PORTAL (:8080)</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN NOC CONTAINER -->
+  <main class="noc-main">
+
+    <!-- GLOBAL TELEMETRY STRIP -->
+    <section class="telemetry-strip">
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-title">ONLINE RIG NODES</span>
+          <span class="stat-badge live">REAL-TIME</span>
+        </div>
+        <div class="stat-body">
+          <span class="stat-num" id="statOnlineNodes">0</span>
+          <span class="stat-sub" id="statNodesSub">0 Registered in Hot RAM</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-title">IN-FLIGHT COMPUTE JOBS</span>
+          <span class="stat-badge computing" id="flightBadge">IDLE</span>
+        </div>
+        <div class="stat-body">
+          <span class="stat-num glow-cyan" id="statInFlight">0</span>
+          <span class="stat-sub" id="statFlightSub">0 active executions</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-title">NETWORK CONCURRENCY SLOTS</span>
+          <span class="stat-badge">HOT RAM</span>
+        </div>
+        <div class="stat-body">
+          <span class="stat-num glow-emerald" id="statMaxCapacity">0</span>
+          <span class="stat-sub" id="statSlotsSub">0 slots available</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-title">GLOBAL UTILIZATION</span>
+          <span class="stat-badge" id="utilBadge">OPTIMAL</span>
+        </div>
+        <div class="stat-body">
+          <div class="util-row">
+            <span class="stat-num" id="statUtilization">0.0%</span>
+            <div class="mini-bar-track">
+              <div class="mini-bar-fill" id="statUtilBar" style="width: 0%;"></div>
+            </div>
+          </div>
+          <span class="stat-sub">Dynamic Slot Saturation</span>
+        </div>
+      </div>
+
+      <div class="stat-card highlight">
+        <div class="stat-header">
+          <span class="stat-title">ACID 4% NET SPREAD</span>
+          <span class="stat-badge profit">TAKE-RATE</span>
+        </div>
+        <div class="stat-body">
+          <span class="stat-num glow-amber" id="statNetSpread">$0.0000</span>
+          <span class="stat-sub">1% Seller + 3% Buyer Spread</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- DOMAIN POOLS CONDITION SECTION -->
+    <section class="section-container">
+      <div class="section-header">
+        <div class="header-tag">
+          <span class="terminal-symbol">❯_</span>
+          <h2>DOMAIN POOLS LIVE CONDITION &amp; LOAD SATURATION</h2>
+        </div>
+        <span class="header-meta">Auto-balanced via Round-Robin Vault Queues</span>
+      </div>
+
+      <div class="pools-grid" id="poolsContainer">
+        <!-- Dynamic Pool Cards Injected via JS -->
+      </div>
+    </section>
+
+    <!-- ACID CLEARINGHOUSE SETTLEMENT TAPE (FULL-WIDTH STREAM) -->
+    <section class="section-container">
+      <div class="tape-container">
+        <div class="section-header">
+          <div class="header-tag">
+            <span class="tape-pulsing-dot"></span>
+            <h2>ACID CLEARINGHOUSE SETTLEMENT TAPE</h2>
+          </div>
+          <div class="tape-meta">
+            <span id="tapeCountBadge">0 Records</span>
+            <button class="btn-mini" id="btnPauseTape" title="Pause ticker auto-scroll">PAUSE TAPE</button>
+          </div>
+        </div>
+
+        <div class="tape-table-wrapper">
+          <table class="tape-table">
+            <thead>
+              <tr>
+                <th>TIME</th>
+                <th>TX HASH</th>
+                <th>BUYER</th>
+                <th>WORKER NODE</th>
+                <th>LATENCY</th>
+                <th>TOKENS</th>
+                <th>GROSS SPEND</th>
+                <th>NET SPREAD (4%)</th>
+                <th>STATUS</th>
+              </tr>
+            </thead>
+            <tbody id="settlementTapeBody">
+              <!-- Injected via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div class="toast-stack" id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

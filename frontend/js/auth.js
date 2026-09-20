@@ -180,6 +180,10 @@ export async function handleAuthSubmit() {
       const name = document.getElementById('authName').value.trim();
       const data = await signupAPI(name, email, password, userType);
 
+      if (data.default_agent && data.default_agent.api_key && data.default_agent.agent_id) {
+        localStorage.setItem('walras_agent_key_' + data.default_agent.agent_id, data.default_agent.api_key);
+      }
+
       const userSession = {
         owner_id: data.owner_id,
         name: data.name,
@@ -244,9 +248,31 @@ export function transitionToDashboard() {
     buyerApiKeyCard.style.display = u.user_type === 'SELLER_OWNER' ? 'none' : 'flex';
   }
 
-  // Tailor Agent Fleet section title and description to account role
+  // Tailor Agent Fleet section and disable Add Node for Buyer accounts
   const fleetTitle = document.getElementById('fleetSectionTitle');
   const fleetSubtitle = document.getElementById('fleetSectionSubtitle');
+  const btnOpenDeploy = document.getElementById('btnOpenDeploy');
+  const isBuyer = u.user_type === 'ENTERPRISE_BUYER' || u.user_type === 'BUYER';
+
+  if (btnOpenDeploy) {
+    btnOpenDeploy.disabled = isBuyer;
+    if (isBuyer) {
+      btnOpenDeploy.style.filter = 'opacity(0.45)';
+      btnOpenDeploy.style.cursor = 'not-allowed';
+      btnOpenDeploy.style.background = 'rgba(255, 255, 255, 0.08)';
+      btnOpenDeploy.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+      btnOpenDeploy.style.boxShadow = 'none';
+      btnOpenDeploy.title = '🔒 Buyer Account: Node hosting disabled. Switch or register as an Agent Seller to monetize agents.';
+    } else {
+      btnOpenDeploy.style.filter = 'none';
+      btnOpenDeploy.style.cursor = 'pointer';
+      btnOpenDeploy.style.background = 'linear-gradient(135deg, #0284c7 0%, #2563eb 50%, #4f46e5 100%)';
+      btnOpenDeploy.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+      btnOpenDeploy.style.boxShadow = '0 4px 14px rgba(37, 99, 235, 0.35)';
+      btnOpenDeploy.title = 'Deploy a new autonomous agent or MCP tool server';
+    }
+  }
+
   if (fleetTitle && fleetSubtitle) {
     if (u.user_type === 'SELLER_OWNER') {
       fleetTitle.innerHTML = '⚡ Monetized Agent Fleet &amp; Worker Nodes';

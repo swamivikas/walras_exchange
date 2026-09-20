@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"walras-exchange/internal/auth"
@@ -44,15 +45,8 @@ func (r *Repository) CreateUserAndDefaultAgent(req *protocol.SignupRequest) (*pr
 		return nil, fmt.Errorf("crypto error: %w", err)
 	}
 
-	// 2. Generate UUIDs
+	// 2. Generate Owner UUID
 	ownerID := uuid.New().String()
-	agentID := uuid.New().String()
-
-	// 3. Generate Cryptographic API Key
-	generatedKey, err := auth.GenerateAPIKey(ownerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate api key: %w", err)
-	}
 
 	// 4. Start Atomic Database Transaction
 	tx, err := r.DB.Begin()
@@ -75,24 +69,17 @@ func (r *Repository) CreateUserAndDefaultAgent(req *protocol.SignupRequest) (*pr
 		return nil, fmt.Errorf("failed to insert owner: %w", err)
 	}
 
-	// 6. Query 2: Insert Initial Agent tailored to user role
-	var defaultAgentName, defaultAgentRole, defaultToolName string
-	var defaultVRAM int = 24
-
-	if req.UserType == "SELLER_OWNER" {
-		defaultAgentName = "Primary-Inference-Node-01"
-		defaultAgentRole = "SELLER"
-		defaultToolName = "deepseek-r1"
-	} else if req.UserType == "HYBRID" {
-		defaultAgentName = "Hybrid-Compute-Node-01"
-		defaultAgentRole = "SELLER"
-		defaultToolName = "deepseek-r1"
-	} else {
-		defaultAgentName = "Enterprise-Buyer-Client"
-		defaultAgentRole = "BUYER"
-		defaultToolName = ""
-		defaultVRAM = 0
+	// 6. Query 2: Provision EXACTLY 1 Initial Agent strictly matching user's chosen role
+	agentID := uuid.New().String()
+	apiKey, err := auth.GenerateAPIKey(ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate api key: %w", err)
 	}
+
+	// 6. Query 2: Provision EXACTLY 1 Default Buyer Agent for EVERY signup
+	agentName := "Enterprise-Buyer-Client"
+	agentRole := "BUYER"
+	vramGB := 0
 
 	agentQuery := `
 		INSERT INTO agents (
@@ -101,22 +88,9 @@ func (r *Repository) CreateUserAndDefaultAgent(req *protocol.SignupRequest) (*pr
 			status, approval_status
 		) VALUES (?, ?, ?, 'GENERAL_LLM_INFERENCE', 4, ?, ?, ?, ?, 0, 'ACTIVE', 'APPROVED')
 	`
-	_, err = tx.Exec(agentQuery, agentID, ownerID, defaultAgentName, defaultVRAM, defaultAgentRole, generatedKey.KeyHash, generatedKey.KeyPrefix)
+	_, err = tx.Exec(agentQuery, agentID, ownerID, agentName, vramGB, agentRole, apiKey.KeyHash, apiKey.KeyPrefix)
 	if err != nil {
-		return nil, fmt.Errorf("failed to insert initial agent: %w", err)
-	}
-
-	// If Seller or Hybrid, also insert initial capability for the model
-	if defaultToolName != "" {
-		capQuery := `
-			INSERT INTO capabilities (
-				id, agent_id, tool_name, description, json_schema,
-				input_token_price_micro_usd, output_token_price_micro_usd, fixed_cost_per_call_micro_usd,
-				avg_latency_ms, reputation_score, is_active
-			) VALUES (?, ?, ?, 'Decentralized frontier reasoning worker', '{"type": "object"}', 2, 2, 0, 0, 5.00, 1)
-		`
-		capID := uuid.New().String()
-		_, _ = tx.Exec(capQuery, capID, agentID, defaultToolName)
+		return nil, fmt.Errorf("failed to insert initial buyer agent: %w", err)
 	}
 
 	// 7. Commit Transaction to MySQL
@@ -124,17 +98,17 @@ func (r *Repository) CreateUserAndDefaultAgent(req *protocol.SignupRequest) (*pr
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// 8. Instantly Hydrate Go Hot RAM (<50ns Live Execution Ready)
+	// 8. Hydrate Buyer Agent in Go Hot RAM (<50ns Live Execution Ready)
 	cachedAgent := &vault.CachedAgent{
 		AgentID:        agentID,
 		OwnerID:        ownerID,
-		Role:           defaultAgentRole,
+		Role:           "BUYER",
 		AgentType:      "GENERAL_LLM_INFERENCE",
 		Status:         "ACTIVE",
 		ApprovalStatus: "APPROVED",
 		CreditLimit:    defaultCreditLimit,
 	}
-	vault.GlobalVault.RegisterAgentInRAM(generatedKey.KeyHash, cachedAgent)
+	vault.GlobalVault.RegisterAgentInRAM(apiKey.KeyHash, cachedAgent)
 
 	// 9. Build and Return Response
 	return &protocol.SignupResponse{
@@ -144,14 +118,14 @@ func (r *Repository) CreateUserAndDefaultAgent(req *protocol.SignupRequest) (*pr
 		UserType: req.UserType,
 		DefaultAgent: protocol.DefaultAgentInfo{
 			AgentID:        agentID,
-			Name:           defaultAgentName,
-			Role:           defaultAgentRole,
+			Name:           agentName,
+			Role:           agentRole,
 			AgentType:      "GENERAL_LLM_INFERENCE",
 			Status:         "ACTIVE",
 			ApprovalStatus: "APPROVED",
 			TrialBalance:   "$50.00 USD",
-			APIKey:         generatedKey.RawKey, // Shown only ONCE
-			APIKeyPrefix:   generatedKey.KeyPrefix,
+			APIKey:         apiKey.RawKey, // Shown only ONCE
+			APIKeyPrefix:   apiKey.KeyPrefix,
 		},
 		Message: "User account and initial agent node initialized successfully.",
 	}, nil
@@ -206,7 +180,7 @@ func (r *Repository) AuthenticateUser(email, password string) (*protocol.LoginRe
 // GetUserAgents fetches all agents owned by an owner ID
 func (r *Repository) GetUserAgents(ownerID string) ([]protocol.UserAgentItem, error) {
 	agentQuery := `
-		SELECT a.id, a.name, a.agent_role, a.agent_type, a.status, a.approval_status, a.balance_micro_usd, a.api_key_prefix,
+		SELECT a.id, a.name, a.agent_role, a.agent_type, a.status, a.approval_status, a.balance_micro_usd, COALESCE(a.api_key_prefix, ''),
 		       COALESCE(c.tool_name, ''), COALESCE(a.vram_gb, 0), COALESCE(a.max_concurrency, 1),
 		       COALESCE(c.description, ''), COALESCE(c.input_token_price_micro_usd, 0), COALESCE(c.output_token_price_micro_usd, 0),
 		       COALESCE(c.fixed_cost_per_call_micro_usd, 0), COALESCE(c.reputation_score, 5.00)
@@ -241,7 +215,9 @@ func (r *Repository) GetUserAgents(ownerID string) ([]protocol.UserAgentItem, er
 			&item.OutputTokenPriceMicroUSD,
 			&item.FixedCostPerCallMicroUSD,
 			&item.ReputationScore,
-		); err == nil {
+		); err != nil {
+			log.Printf("⚠️ [DB] Error scanning agent row: %v", err)
+		} else {
 			agents = append(agents, item)
 		}
 	}

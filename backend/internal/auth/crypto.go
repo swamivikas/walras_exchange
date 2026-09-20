@@ -33,8 +33,8 @@ func CheckPassword(password, hash string) bool {
 
 // GenerateAPIKey creates a cryptographically secure, scoped API key
 func GenerateAPIKey(ownerID string) (*GeneratedAPIKey, error) {
-	// 1. Generate 32 secure random bytes
-	randomBytes := make([]byte, 32)
+	// 1. Generate 16 secure random bytes (32 hex characters)
+	randomBytes := make([]byte, 16)
 	if _, err := rand.Read(randomBytes); err != nil {
 		return nil, fmt.Errorf("failed to generate random bytes: %w", err)
 	}
@@ -45,7 +45,7 @@ func GenerateAPIKey(ownerID string) (*GeneratedAPIKey, error) {
 		cleanOwnerID = cleanOwnerID[:8]
 	}
 
-	// 2. Format: walras_live_org_<shortOwnerID>_<randomHex>
+	// 2. Format: walras_live_org_<shortOwnerID>_<randomHex> (56 chars total)
 	rawKey := fmt.Sprintf("walras_live_org_%s_%s", cleanOwnerID, randomHex)
 
 	// 3. Compute SHA-256 hash for database and in-memory matching
@@ -53,8 +53,8 @@ func GenerateAPIKey(ownerID string) (*GeneratedAPIKey, error) {
 	hasher.Write([]byte(rawKey))
 	keyHash := hex.EncodeToString(hasher.Sum(nil))
 
-	// 4. Prefix for UI display (e.g., walras_live_org_9b1deb4d_...3f8a)
-	keyPrefix := rawKey[:28] + "..." + rawKey[len(rawKey)-4:]
+	// 4. Store the complete key so UI Copy & Tunnel Cmd buttons copy the real runnable key!
+	keyPrefix := rawKey
 
 	return &GeneratedAPIKey{
 		RawKey:    rawKey,

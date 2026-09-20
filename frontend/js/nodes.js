@@ -35,7 +35,8 @@ export function initNodes() {
 }
 
 export function openDeployModal() {
-  if (state.currentUser && state.currentUser.user_type === 'ENTERPRISE_BUYER') {
+  const isBuyer = !state.currentUser || state.currentUser.user_type === 'ENTERPRISE_BUYER' || state.currentUser.user_type === 'BUYER';
+  if (isBuyer) {
     return; // Buyer account disabled
   }
   document.getElementById('deployNodeModal').classList.remove('hidden');
@@ -52,12 +53,13 @@ export async function fetchAndRenderAgents() {
   if (!state.currentUser || !state.currentUser.owner_id) return;
   const container = document.getElementById('userAgentList');
   const btnOpen = document.getElementById('btnOpenDeploy');
-  const isBuyer = state.currentUser.user_type === 'ENTERPRISE_BUYER';
+  const isBuyer = state.currentUser.user_type === 'ENTERPRISE_BUYER' || state.currentUser.user_type === 'BUYER';
 
-  // Apply visual blurring and tooltip if Buyer account
+  // Apply visual blurring, disabled state and tooltip if Buyer account
   if (btnOpen) {
+    btnOpen.disabled = isBuyer;
     if (isBuyer) {
-      btnOpen.style.filter = 'blur(1px) opacity(0.45)';
+      btnOpen.style.filter = 'opacity(0.45)';
       btnOpen.style.cursor = 'not-allowed';
       btnOpen.style.background = 'rgba(255, 255, 255, 0.08)';
       btnOpen.style.borderColor = 'rgba(255, 255, 255, 0.15)';
@@ -99,74 +101,78 @@ export async function fetchAndRenderAgents() {
     }
 
     container.innerHTML = agents.map(a => {
-      const isSeller = a.role === 'SELLER';
+      const isSeller = a.role === 'SELLER' || a.role === 'HYBRID';
       const statusClass = a.approval_status === 'APPROVED' ? 'status-tag approved' : 'status-tag pending';
       const modelDisplayName = a.model || (isSeller ? 'deepseek-r1' : 'General Buyer Ingress');
       const vramInfo = a.vram_gb ? `${a.vram_gb}GB VRAM` : '24GB VRAM';
-      const roleLabel = isSeller ? '⚡ SELLER' : '🏢 BUYER';
-      const keyPrefix = a.api_key_prefix || 'walras_live_org_...';
+      const roleLabel = a.role === 'BUYER' ? '🏢 BUYER' : (a.role === 'SELLER' ? '⚡ SELLER' : '🔄 HYBRID');
       const rawId = a.agent_id || a.id || '';
-      const shortId = rawId ? (rawId.length > 8 ? rawId.substring(0, 8) + '...' : rawId) : '--';
-      const descriptionText = a.description || (isSeller ? 'Autonomous reasoning & compute worker' : 'Ingress client endpoint');
+      const cachedKey = localStorage.getItem('walras_agent_key_' + rawId);
+      const rawKey = cachedKey || a.api_key_prefix || 'walras_live_org_...';
+      const displayKey = rawKey.length > 24 ? rawKey.substring(0, 18) + '...' + rawKey.slice(-4) : rawKey;
       
-      // Calculate token and fixed pricing display
-      const inPriceUSD = a.input_token_price_micro_usd ? (a.input_token_price_micro_usd / 1000).toFixed(3) : '0.002';
-      const outPriceUSD = a.output_token_price_micro_usd ? (a.output_token_price_micro_usd / 1000).toFixed(3) : '0.002';
-      const fixedFeeDisplay = a.fixed_cost_per_call_micro_usd > 0 ? ` + ${a.fixed_cost_per_call_micro_usd}µ/call` : '';
-      const repScore = a.reputation_score ? a.reputation_score.toFixed(2) : '5.00';
+      const inPrice = a.input_token_price_micro_usd || 0;
+      const outPrice = a.output_token_price_micro_usd || 0;
+      const fixedFee = a.fixed_cost_per_call_micro_usd || 0;
+      const reputation = a.reputation_score ? Number(a.reputation_score).toFixed(2) : '5.00';
+
+      let pricingDisplay = isSeller 
+        ? `$${(inPrice / 1000).toFixed(4)} in / $${(outPrice / 1000).toFixed(4)} out`
+        : 'Enterprise Ingress';
+      if (fixedFee > 0) {
+        pricingDisplay += ` + $${(fixedFee / 1000000).toFixed(3)}/call`;
+      }
 
       return `
-        <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.15s ease;">
+        <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(255, 255, 255, 0.02)'" onmouseout="this.style.background='transparent'">
           
           <!-- Column 1: Agent ID -->
-          <td style="padding: 14px 14px; white-space: nowrap;">
-            <span style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-cyan); cursor: pointer;" title="${rawId}">
-              ${shortId}
-            </span>
+          <td style="padding: 14px 14px; font-family: var(--font-mono); font-size: 12px; color: var(--accent-cyan); white-space: nowrap;">
+            #${rawId ? rawId.substring(0, 8) : '--'}
           </td>
 
-          <!-- Column 2: Agent / Node Name & Type -->
+          <!-- Column 2: Name & Type -->
           <td style="padding: 14px 14px; white-space: nowrap;">
-            <div style="font-weight: 700; color: #fff; font-size: 14px;">
-              ${a.name}
-            </div>
-            <div style="font-size: 11px; color: var(--accent-cyan); margin-top: 2px; font-family: var(--font-mono);">
-              ${a.agent_type || 'GENERAL_LLM_INFERENCE'}
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <span style="font-weight: 700; color: #fff; font-size: 13px;">${a.name}</span>
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--accent-cyan); letter-spacing: 0.5px;">
+                🏷️ ${a.agent_type || 'GENERAL_LLM_INFERENCE'}
+              </span>
             </div>
           </td>
 
-          <!-- Column 3: Role -->
+          <!-- Column 3: Role Badge -->
           <td style="padding: 14px 14px; white-space: nowrap;">
-            <span style="background: ${isSeller ? 'rgba(245, 158, 11, 0.15)' : 'rgba(56, 189, 248, 0.15)'}; color: ${isSeller ? 'var(--accent-amber)' : 'var(--accent-cyan)'}; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; border: 1px solid ${isSeller ? 'rgba(245, 158, 11, 0.3)' : 'rgba(56, 189, 248, 0.3)'};">
-              ${roleLabel}
+            <span class="role-badge ${a.role === 'BUYER' ? 'buyer' : (a.role === 'SELLER' ? 'seller' : 'hybrid')}" style="font-size: 10px; padding: 3px 8px;">
+              ${a.role}
             </span>
           </td>
 
-          <!-- Column 4: Capability & Description -->
+          <!-- Column 4: Tool Capability & Spec -->
           <td style="padding: 14px 14px;">
-            <div style="font-weight: 600; color: #fff; font-size: 13px; display: flex; align-items: center; gap: 6px;">
-              <span>${isSeller ? '⚡' : '🧠'} ${modelDisplayName}</span>
-              <span style="color: var(--text-muted); font-size: 11px;">(${vramInfo} • ${a.max_concurrency || 1}x)</span>
-            </div>
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 3px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${descriptionText}">
-              ${descriptionText}
-            </div>
-          </td>
-
-          <!-- Column 5: Pricing & Reputation -->
-          <td style="padding: 14px 14px; white-space: nowrap;">
-            <div style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-emerald);">
-              $${inPriceUSD} / $${outPriceUSD}${fixedFeeDisplay}
-            </div>
-            <div style="font-size: 11px; color: var(--accent-amber); margin-top: 2px;">
-              ⭐ ${repScore} / 5.00
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <span style="font-family: var(--font-mono); font-weight: 600; font-size: 12px; color: #e2e8f0;">
+                ${a.model || (isSeller ? 'deepseek-r1' : 'Universal OpenAI Client')}
+              </span>
+              <div style="font-size: 11px; color: var(--text-muted); display: flex; gap: 8px;">
+                ${a.vram_gb ? `<span style="color: var(--accent-amber);">💾 ${a.vram_gb}GB VRAM</span> • ` : ''}
+                <span>⚡ Max Concurrency: ${a.max_concurrency || 1}</span>
+              </div>
             </div>
           </td>
 
-          <!-- Column 6: Status & Approval -->
+          <!-- Column 5: Pricing & Rep -->
           <td style="padding: 14px 14px; white-space: nowrap;">
-            <div style="display: flex; align-items: center; gap: 6px;">
-              ${a.status === 'ACTIVE' 
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <span style="font-size: 12px; font-weight: 600; color: #cbd5e1;">${pricingDisplay}</span>
+              <span style="font-size: 11px; color: var(--accent-emerald);">⭐ ${reputation} Score</span>
+            </div>
+          </td>
+
+          <!-- Column 6: Status -->
+          <td style="padding: 14px 14px; white-space: nowrap;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              ${a.status === 'ACTIVE'
                 ? '<span style="color: var(--accent-emerald); font-weight: 600; font-size: 12px;">● ACTIVE</span>'
                 : (a.status === 'OFFLINE'
                   ? '<span style="color: var(--text-muted); font-weight: 600; font-size: 12px;">○ OFFLINE</span>'
@@ -181,10 +187,10 @@ export async function fetchAndRenderAgents() {
           <!-- Column 7: Scoped API Key with Copy in front -->
           <td style="padding: 14px 14px; white-space: nowrap;">
             <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-emerald); background: rgba(0, 0, 0, 0.4); padding: 5px 10px; border-radius: 4px; border: 1px dashed rgba(16, 185, 129, 0.35); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${keyPrefix}">
-                ${keyPrefix}
+              <span style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-emerald); background: rgba(0, 0, 0, 0.4); padding: 5px 10px; border-radius: 4px; border: 1px dashed rgba(16, 185, 129, 0.35); max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${rawKey}">
+                ${displayKey}
               </span>
-              <button type="button" class="btn-copy-node-key" data-key="${keyPrefix}" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: var(--accent-cyan); padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s;">
+              <button type="button" class="btn-copy-node-key" data-key="${rawKey}" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: var(--accent-cyan); padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s;">
                 📋 Copy
               </button>
             </div>
@@ -193,7 +199,7 @@ export async function fetchAndRenderAgents() {
           <!-- Column 8: Action -->
           <td style="padding: 14px 14px; text-align: right; white-space: nowrap;">
             ${isSeller ? `
-              <button type="button" class="btn-copy-daemon-cmd" data-cmd="python daemon.py --key=${keyPrefix} --endpoint=ws://localhost:8080/v1/provider/tunnel" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: var(--accent-amber); padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s;">
+              <button type="button" class="btn-copy-daemon-cmd" data-cmd="python daemon.py --key=${rawKey} --endpoint=ws://localhost:8080/v1/provider/tunnel" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: var(--accent-amber); padding: 5px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.2s;">
                 ⚡ Tunnel Cmd
               </button>
             ` : `
@@ -280,6 +286,9 @@ export async function handleSubmitNewSellerAgent() {
     });
 
     const key = data.node_api_key || data.api_key || 'walras_live_org_...';
+    if (data.agent_id && key) {
+      localStorage.setItem('walras_agent_key_' + data.agent_id, key);
+    }
     document.getElementById('rawKeyOutput').innerText = key;
     document.getElementById('newKeyReveal').classList.remove('hidden');
     fetchAndRenderAgents();

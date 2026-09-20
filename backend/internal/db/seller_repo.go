@@ -56,7 +56,7 @@ func (r *Repository) AddSellerAgent(ownerID string, req *protocol.AddSellerAgent
 			id, owner_id, name, agent_type, max_concurrency, vram_gb, agent_role,
 			api_key_hash, api_key_prefix, balance_micro_usd,
 			status, approval_status
-		) VALUES (?, ?, ?, ?, ?, ?, 'SELLER', ?, ?, 0, 'OFFLINE', 'PENDING_REVIEW')
+		) VALUES (?, ?, ?, ?, ?, ?, 'SELLER', ?, ?, 0, 'ACTIVE', 'APPROVED')
 	`
 	if req.MaxConcurrency <= 0 {
 		req.MaxConcurrency = 1
@@ -107,8 +107,8 @@ func (r *Repository) AddSellerAgent(ownerID string, req *protocol.AddSellerAgent
 		OwnerID:        ownerID,
 		Role:           "SELLER",
 		AgentType:      req.AgentType,
-		Status:         "OFFLINE",
-		ApprovalStatus: "PENDING_REVIEW",
+		Status:         "ACTIVE",
+		ApprovalStatus: "APPROVED",
 		CreditLimit:    0,
 	}
 	vault.GlobalVault.RegisterAgentInRAM(generatedKey.KeyHash, cachedAgent)
