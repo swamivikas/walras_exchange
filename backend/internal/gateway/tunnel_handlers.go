@@ -104,6 +104,35 @@ func (h *TunnelHandler) HandleProviderTunnel(w http.ResponseWriter, r *http.Requ
 		Conn:           conn,
 		ConnectedAt:    time.Now(),
 	}
+
+	// Pre-load all registered capabilities & rate cards into Hot RAM once upon connection
+	capRows, err := h.Repo.DB.Query(`
+		SELECT id, tool_name, input_token_price_micro_usd, output_token_price_micro_usd, fixed_cost_per_call_micro_usd, reputation_score, is_active
+		FROM capabilities
+		WHERE agent_id = ? AND is_active = 1
+	`, agent.AgentID)
+	if err == nil {
+		defer capRows.Close()
+		for capRows.Next() {
+			var c tunnel.NodeCapability
+			c.AgentID = agent.AgentID
+			var rep sql.NullFloat64
+			var active int
+			if err := capRows.Scan(&c.CapabilityID, &c.ToolName, &c.InputTokenPriceMicroUSD, &c.OutputTokenPriceMicroUSD, &c.FixedCostPerCallMicroUSD, &rep, &active); err == nil {
+				if rep.Valid {
+					c.ReputationScore = rep.Float64
+				} else {
+					c.ReputationScore = 5.00
+				}
+				c.IsActive = (active == 1)
+				session.Capabilities = append(session.Capabilities, c)
+				if session.Model == "" {
+					session.Model = c.ToolName
+				}
+			}
+		}
+	}
+
 	tunnel.GlobalTunnelPool.RegisterSession(session)
 	defer tunnel.GlobalTunnelPool.UnregisterSession(agent.AgentID)
 	defer conn.Close()
@@ -122,8 +151,16 @@ func (h *TunnelHandler) HandleProviderTunnel(w http.ResponseWriter, r *http.Requ
 			if reqID, ok := respMap["request_id"].(string); ok {
 				if chVal, found := session.PendingJobs.Load(reqID); found {
 					ch := chVal.(chan []byte)
-					ch <- payload
-					session.PendingJobs.Delete(reqID)
+					select {
+					case ch <- payload:
+					default:
+						// Buffer full or slow consumer
+					}
+					// Only deregister once the final completion frame arrives
+					status, _ := respMap["status"].(string)
+					if status != "STREAMING" {
+						session.PendingJobs.Delete(reqID)
+					}
 				}
 			}
 		}

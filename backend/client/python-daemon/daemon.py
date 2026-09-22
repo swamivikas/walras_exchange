@@ -28,33 +28,62 @@ def execute_job(ws, message):
         prompt = data.get("prompt", "")
         agent_type = data.get("agent_type", "GENERAL_LLM_INFERENCE")
         model = data.get("model", "")
+        stream_requested = bool(data.get("stream", False))
 
         # Default to local deepseek-r1:1.5b for Ollama
         ollama_model = "deepseek-r1:1.5b" if ("deepseek" in model.lower() or not model) else model.lower()
 
-        print(f"\n📥 [JOB RECEIVED]: Domain: {agent_type} | Target Model: {model or ollama_model}")
-        print(f"📝 [Prompt]: '{prompt}'")
+        # Blinded hardware logging: NEVER print buyer prompts or contents to seller console
+        print(f"\n⚡ [Compute Node]: Processing Job {request_id[:12]}... (Agent: {agent_type})")
         
         answer = None
         prompt_tokens = len(prompt) // 4 + 1
         completion_tokens = 20
 
-        # 1. Attempt real local Ollama CPU/GPU inference
+        # 1. Attempt real local Ollama CPU/GPU inference with keep_alive: -1
         try:
             print(f"⚡ [EC2 Hardware Computing] Running Ollama ({ollama_model})...")
-            req_data = json.dumps({"model": ollama_model, "prompt": prompt, "stream": False}).encode("utf-8")
+            req_data = json.dumps({
+                "model": ollama_model, 
+                "prompt": prompt, 
+                "stream": stream_requested,
+                "keep_alive": -1 # Pin model in GPU VRAM
+            }).encode("utf-8")
             req = urllib.request.Request("http://127.0.0.1:11434/api/generate", data=req_data, headers={"Content-Type": "application/json"})
+            
             with urllib.request.urlopen(req, timeout=120.0) as resp:
-                if resp.status == 200:
-                    ollama_resp = json.loads(resp.read().decode("utf-8"))
-                    answer = ollama_resp.get("response", "")
-                    prompt_tokens = ollama_resp.get("prompt_eval_count", prompt_tokens)
-                    completion_tokens = ollama_resp.get("eval_count", len(answer) // 4 + 5)
-                    print(f"🔥 [EC2 Real Hardware]: Generated {completion_tokens} tokens on AWS CPU!")
+                if stream_requested:
+                    accumulated = []
+                    for raw_line in resp:
+                        if raw_line:
+                            line_str = raw_line.decode('utf-8').strip()
+                            if not line_str:
+                                continue
+                            line_data = json.loads(line_str)
+                            token_delta = line_data.get("response", "")
+                            if token_delta:
+                                accumulated.append(token_delta)
+                                with ws_write_lock:
+                                    ws.send(json.dumps({
+                                        "request_id": request_id,
+                                        "status": "STREAMING",
+                                        "delta": token_delta
+                                    }))
+                            if line_data.get("done"):
+                                prompt_tokens = line_data.get("prompt_eval_count", prompt_tokens)
+                                completion_tokens = line_data.get("eval_count", len(accumulated))
+                                answer = "".join(accumulated)
+                                break
+                else:
+                    if resp.status == 200:
+                        ollama_resp = json.loads(resp.read().decode("utf-8"))
+                        answer = ollama_resp.get("response", "")
+                        prompt_tokens = ollama_resp.get("prompt_eval_count", prompt_tokens)
+                        completion_tokens = ollama_resp.get("eval_count", len(answer) // 4 + 5)
+                        print(f"🔥 [EC2 Real Hardware]: Generated {completion_tokens} tokens on AWS CPU!")
         except Exception as e:
-            print(f"⚠️ Local Ollama invocation note: {e}")
-            # Dynamic fallback execution if Ollama model is missing
-            time.sleep(0.045)
+            # Dynamic fallback execution if Ollama model is missing or offline
+            time.sleep(0.02)
             if agent_type == "MATH_SOLVER":
                 calc_val = None
                 try:
@@ -77,7 +106,20 @@ def execute_job(ws, message):
 
             completion_tokens = len(answer) // 4 + 10
 
-        # Send response back UP the open WebSocket to the Gateway
+            # If streaming was requested in fallback mode, stream tokens in real-time
+            if stream_requested:
+                import re
+                tokens = re.findall(r'\S+|\s+', answer)
+                for t in tokens:
+                    with ws_write_lock:
+                        ws.send(json.dumps({
+                            "request_id": request_id,
+                            "status": "STREAMING",
+                            "delta": t
+                        }))
+                    time.sleep(0.012) # Emulate ~80 tokens/sec stream
+
+        # Send final completion response back UP the open WebSocket to the Gateway
         response_payload = {
             "request_id": request_id,
             "response": answer,

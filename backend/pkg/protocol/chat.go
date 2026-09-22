@@ -13,6 +13,7 @@ type ChatCompletionRequest struct {
 	Messages    []ChatMessage `json:"messages"`             // Array of conversation messages
 	Temperature float64       `json:"temperature"`          // 0.0 to 1.0
 	MaxTokens   int           `json:"max_tokens"`
+	Stream      bool          `json:"stream,omitempty"`     // Server-Sent Events (SSE) streaming mode
 }
 
 // ChatChoice represents a generated completion choice
@@ -37,7 +38,7 @@ type SettlementDetails struct {
 	ExecutionNodeID     string `json:"execution_node_id"`
 }
 
-// ChatCompletionResponse is returned to the buyer
+// ChatCompletionResponse is returned to the buyer (non-streaming)
 type ChatCompletionResponse struct {
 	ID         string            `json:"id"`
 	Object     string            `json:"object"` // "chat.completion"
@@ -46,4 +47,21 @@ type ChatCompletionResponse struct {
 	Choices    []ChatChoice      `json:"choices"`
 	Usage      TokenUsage        `json:"usage"`
 	Settlement SettlementDetails `json:"settlement"`
+}
+
+// ChatCompletionChunkChoice represents delta content in an SSE stream
+type ChatCompletionChunkChoice struct {
+	Index        int         `json:"index"`
+	Delta        ChatMessage `json:"delta"`
+	FinishReason *string     `json:"finish_reason"`
+}
+
+// ChatCompletionChunk is an SSE streaming event packet (OpenAI standard)
+type ChatCompletionChunk struct {
+	ID         string                      `json:"id"`
+	Object     string                      `json:"object"` // "chat.completion.chunk"
+	Created    int64                       `json:"created"`
+	Model      string                      `json:"model"`
+	Choices    []ChatCompletionChunkChoice `json:"choices"`
+	Settlement *SettlementDetails          `json:"settlement,omitempty"`
 }

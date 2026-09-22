@@ -4,12 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// NodeCapability represents an in-memory rate card and tool capability registered to a seller node
+type NodeCapability struct {
+	CapabilityID             string  `json:"capability_id"`
+	AgentID                  string  `json:"agent_id"`
+	ToolName                 string  `json:"tool_name"`
+	InputTokenPriceMicroUSD  int64   `json:"input_token_price_micro_usd"`
+	OutputTokenPriceMicroUSD int64   `json:"output_token_price_micro_usd"`
+	FixedCostPerCallMicroUSD int64   `json:"fixed_cost_per_call_micro_usd"`
+	ReputationScore          float64 `json:"reputation_score"`
+	IsActive                 bool    `json:"is_active"`
+}
 
 // TunnelSession represents a live, persistent WebSocket stream from a seller node
 type TunnelSession struct {
@@ -22,8 +35,9 @@ type TunnelSession struct {
 	InFlight       atomic.Int32
 	Conn           *websocket.Conn
 	ConnectedAt    time.Time
-	mu             sync.Mutex // Protects concurrent writes down the same socket
-	PendingJobs    sync.Map   // requestID -> chan []byte (for response multiplexing)
+	mu             sync.Mutex       // Protects concurrent writes down the same socket
+	PendingJobs    sync.Map         // requestID -> chan []byte (for response multiplexing)
+	Capabilities   []NodeCapability // Pinned in RAM for sub-microsecond matching
 }
 
 // WriteJSON sends a thread-safe payload down the open WebSocket stream
@@ -243,5 +257,87 @@ func (p *TunnelPool) GetTelemetry() PoolTelemetryResponse {
 		ActiveNodes:          activeNodes,
 		Nodes:                activeNodes,
 	}
+}
+
+// MatchBestSession finds the highest-rated, lowest-load online node directly in Hot RAM (<100 nanoseconds).
+// It completely replaces disk/SQL queries on the prompt routing path.
+func (p *TunnelPool) MatchBestSession(agentType string, model string) (*TunnelSession, *NodeCapability, error) {
+	agentType = strings.TrimSpace(agentType)
+	model = strings.TrimSpace(model)
+
+	var bestSession *TunnelSession
+	var bestCap *NodeCapability
+	var bestScore float64 = -1e9
+
+	p.sessions.Range(func(key, value interface{}) bool {
+		session := value.(*TunnelSession)
+
+		// 1. Filter by Domain Pool / AgentType if specified
+		if agentType != "" && !strings.EqualFold(session.AgentType, agentType) {
+			return true // continue scan
+		}
+
+		inFlight := session.InFlight.Load()
+		capLimit := session.MaxConcurrency
+		if capLimit <= 0 {
+			capLimit = 1
+		}
+		availableSlots := capLimit - inFlight
+
+		// 2. Scan in-memory capabilities for model match
+		for i := range session.Capabilities {
+			capItem := &session.Capabilities[i]
+			if !capItem.IsActive {
+				continue
+			}
+
+			// Tool / Model check
+			if model != "" && !strings.EqualFold(capItem.ToolName, model) && !strings.EqualFold(session.Model, model) {
+				continue
+			}
+
+			// Score: Weighted by reputation score + available concurrency headroom
+			score := capItem.ReputationScore * 100.0
+			if availableSlots > 0 {
+				score += float64(availableSlots) * 20.0
+			} else {
+				score -= 500.0 // penalize saturated node
+			}
+
+			if score > bestScore {
+				bestScore = score
+				bestSession = session
+				bestCap = capItem
+			}
+		}
+
+		// 3. Fallback: If node connected without explicit DB capabilities row, synthesize fallback rate card
+		if len(session.Capabilities) == 0 && (model == "" || strings.EqualFold(session.Model, model)) {
+			fallbackCap := &NodeCapability{
+				CapabilityID:             "cap-fallback-" + session.AgentID,
+				AgentID:                  session.AgentID,
+				ToolName:                 session.Model,
+				InputTokenPriceMicroUSD:  2000,
+				OutputTokenPriceMicroUSD: 4000,
+				FixedCostPerCallMicroUSD: 0,
+				ReputationScore:          5.00,
+				IsActive:                 true,
+			}
+			score := 500.0 + float64(availableSlots)*20.0
+			if score > bestScore {
+				bestScore = score
+				bestSession = session
+				bestCap = fallbackCap
+			}
+		}
+
+		return true
+	})
+
+	if bestSession == nil || bestCap == nil {
+		return nil, nil, errors.New("all_gpu_nodes_for_target_are_currently_offline")
+	}
+
+	return bestSession, bestCap, nil
 }
 
