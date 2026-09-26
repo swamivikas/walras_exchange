@@ -8,16 +8,16 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 URL = "http://localhost:8080/v1/chat/completions"
 HEADERS = {
-    "Authorization": "Bearer walras_live_org_5987bfec_e2ddbec4b678f307a6de07e39f0278d3",
+    "Authorization": "Bearer walras_live_org_b44e2188_d7ea75e39247706df4be7c4f36994fd3",
     "Content-Type": "application/json"
 }
 
 payload = {
     "agent_type": "MATH_SOLVER",
-    "model": "",
+    "model": "deepseek-r1:1.5b",
     "stream": True,
     "messages": [
-        {"role": "user", "content": "Calculate 15 * 14 and explain step by step."}
+        {"role": "user", "content": "Calculate the derivative of x^4 - 4x^2 + 7 step by step."}
     ]
 }
 

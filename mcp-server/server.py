@@ -20,7 +20,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 GATEWAY_URL = os.environ.get("WALRAS_GATEWAY_URL", "http://localhost:8080").rstrip("/")
-API_KEY = os.environ.get("WALRAS_API_KEY", "walras_live_org_5987bfec_e2ddbec4b678f307a6de07e39f0278d3")
+API_KEY = "walras_live_org_b44e2188_d7ea75e39247706df4be7c4f36994fd3"
 
 # Domain Capabilities supported by Walras Decentralized Clearinghouse
 TOOLS_REGISTRY = [
